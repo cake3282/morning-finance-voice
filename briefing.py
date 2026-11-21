@@ -39,7 +39,7 @@ def generate_script(headlines: str) -> str:
 {headlines}
 """
     resp = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return resp.text.strip()
