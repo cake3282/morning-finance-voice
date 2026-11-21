@@ -2,6 +2,7 @@ import asyncio
 import html
 import os
 import re
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -70,6 +71,7 @@ def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
 def clean_script_for_weekend(text: str, is_weekend: bool) -> str:
     if not is_weekend:
         return text
+    # 避免週末語音稿出現「今日開盤／盤前」等誤導詞彙
     cleaned = re.sub(r"(今日|今天)(台股|美股|股市)?(即將|準備)?(開盤|盤前)", "本週市場", text)
     return cleaned
 
@@ -106,12 +108,23 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
 近期財經新聞與摘要：
 {news_digest}
 """
-    resp = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-    )
-    raw_text = resp.text.strip()
-    return clean_script_for_weekend(raw_text, is_weekend)
+    # 輪流嘗試主要與備用模型，並在失敗時等待重試
+    models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash"]
+
+    for model_name in models_to_try:
+        for attempt in range(3):
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                raw_text = resp.text.strip()
+                return clean_script_for_weekend(raw_text, is_weekend)
+            except Exception as e:
+                print(f"嘗試使用 {model_name} (第 {attempt + 1} 次) 失敗: {e}")
+                time.sleep(5)
+
+    raise RuntimeError("無法從 Gemini API 取得回覆，請稍後重試。")
 
 
 async def text_to_speech(text: str, mp3_path: str = "briefing.mp3") -> None:
