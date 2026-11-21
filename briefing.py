@@ -1,4 +1,5 @@
 import asyncio
+import html
 import os
 import re
 from datetime import datetime
@@ -19,32 +20,61 @@ RSS_FEEDS = [
 ]
 
 
-def fetch_headlines(limit: int = 12) -> str:
+def clean_html_text(raw_html: str) -> str:
+    if not raw_html:
+        return ""
+    # 移除 HTML 標籤並還原跳脫字元
+    text = re.sub(r"<[^>]+>", " ", raw_html)
+    text = html.unescape(text)
+    # 合併多餘空白與換行
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
     items = []
     seen_titles = set()
+
     for url in RSS_FEEDS:
         feed = feedparser.parse(url)
         for entry in feed.entries[:8]:
-            title = entry.get("title", "").strip()
-            pub_date = entry.get("published", "").strip()
+            title = clean_html_text(entry.get("title", ""))
+            pub_date = clean_html_text(entry.get("published", ""))
+            raw_summary = entry.get("summary") or entry.get("description") or ""
+            summary = clean_html_text(raw_summary)
+
+            # 若摘要跟標題幾乎一樣，就不再重複貼一次
+            if summary and summary.lower() == title.lower():
+                summary = ""
+
+            if len(summary) > summary_max_len:
+                summary = summary[:summary_max_len].rstrip() + "..."
+
             if title and title not in seen_titles:
                 seen_titles.add(title)
+                line = f"- 標題：{title}"
                 if pub_date:
-                    items.append(f"- [{pub_date}] {title}")
-                else:
-                    items.append(f"- {title}")
-    return "\n".join(items[:limit])
+                    line += f"（時間：{pub_date}）"
+                if summary:
+                    line += f"\n  摘要：{summary}"
+                items.append(line)
+
+            if len(items) >= limit:
+                break
+        if len(items) >= limit:
+            break
+
+    return "\n".join(items)
 
 
 def clean_script_for_weekend(text: str, is_weekend: bool) -> str:
     if not is_weekend:
         return text
-    # 避免週末語音稿出現「今日開盤／盤前」等誤導詞彙
     cleaned = re.sub(r"(今日|今天)(台股|美股|股市)?(即將|準備)?(開盤|盤前)", "本週市場", text)
     return cleaned
 
 
-def generate_script(headlines: str, now_tw: datetime) -> str:
+def generate_script(news_digest: str, now_tw: datetime) -> str:
     client = genai.Client(api_key=GEMINI_API_KEY)
     weekday_map = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
     today_str = now_tw.strftime("%Y年%m月%d日")
@@ -67,14 +97,14 @@ def generate_script(headlines: str, now_tw: datetime) -> str:
 你是每天早上七點播報的財經主播。現在時間是台灣時間 {today_str}（{weekday_str}）。
 {mode_instruction}
 
-請根據以下附帶發布時間的財經新聞列表，寫一份約 550 到 750 字（朗讀約 2.5 到 3.5 分鐘）的繁體中文晨報口語稿。
+請根據以下財經新聞標題與摘要，寫一份約 550 到 750 字（朗讀約 2.5 到 3.5 分鐘）的繁體中文晨報口語稿。
 要求：
-1. 專為「語音朗讀」撰寫：使用自然口語、完整句子，不要用 Markdown 星號、條列符號或難唸的縮寫堆砌；股票代號或英文專有名詞請附上好唸的中文稱呼（例如特斯拉、輝達、標普五百、那斯達克）。
-2. 優先參考日期較新的新聞；若標題有舊日期或與今天日期不同，請自然改用「本週市場焦點」或「近期觀察」敘述，不要照抄舊日期。
+1. 依據標題與摘要的事實脈絡撰寫，不要自行腦補未提到的數字或事件。
+2. 專為「語音朗讀」撰寫：使用自然口語、完整句子，不要用 Markdown 星號、條列符號或難唸的縮寫堆砌；股票代號或英文專有名詞請附上好唸的中文稱呼（例如特斯拉、輝達、標普五百、那斯達克）。
 3. 開頭問候早安並清楚說出今天是 {today_str} {weekday_str}，結尾提醒投資人留意風險與市場波動。
 
-近期財經新聞（含發布時間）：
-{headlines}
+近期財經新聞與摘要：
+{news_digest}
 """
     resp = client.models.generate_content(
         model="gemini-3.8-flash",
@@ -108,8 +138,10 @@ def send_telegram(text: str, mp3_path: str = "briefing.mp3") -> None:
 
 def main() -> None:
     now_tw = datetime.now(ZoneInfo("Asia/Taipei"))
-    headlines = fetch_headlines()
-    script = generate_script(headlines, now_tw)
+    news_digest = fetch_headlines()
+    print("=== FETCHED NEWS DIGEST ===")
+    print(news_digest)
+    script = generate_script(news_digest, now_tw)
     asyncio.run(text_to_speech(script))
     send_telegram(script)
 
