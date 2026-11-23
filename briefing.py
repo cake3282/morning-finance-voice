@@ -20,6 +20,11 @@ RSS_FEEDS = [
     "https://news.google.com/rss/search?q=%E5%8F%B0%E8%82%A1+%E7%BE%8E%E8%82%A1+%E5%8D%8A%E5%B0%8E%E9%AB%94+when:2d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
 ]
 
+# 偽裝瀏覽器請求頭，避免被 RSS 伺服器阻擋或卡死
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 
 def clean_html_text(raw_html: str) -> str:
     if not raw_html:
@@ -37,7 +42,14 @@ def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
     seen_titles = set()
 
     for url in RSS_FEEDS:
-        feed = feedparser.parse(url)
+        try:
+            # 加入 10 秒 Timeout 保護，防止連線 Hang 住
+            resp = requests.get(url, headers=HEADERS, timeout=10)
+            feed = feedparser.parse(resp.content)
+        except Exception as e:
+            print(f"抓取 RSS 失敗 ({url}): {e}")
+            continue
+
         for entry in feed.entries[:8]:
             title = clean_html_text(entry.get("title", ""))
             pub_date = clean_html_text(entry.get("published", ""))
@@ -108,7 +120,6 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
 近期財經新聞與摘要：
 {news_digest}
 """
-    # 修正模型備用清單：使用現行支援的 gemini-3.8-flash, gemini-3.5-flash 與 gemini-3.5-lite
     models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-lite"]
 
     for model_name in models_to_try:
@@ -122,7 +133,7 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
                 return clean_script_for_weekend(raw_text, is_weekend)
             except Exception as e:
                 print(f"嘗試使用 {model_name} (第 {attempt + 1} 次) 失敗: {e}")
-                time.sleep(10)  # 遇到忙碌時等待 10 秒再重試
+                time.sleep(10)
 
     raise RuntimeError("無法從 Gemini API 取得回覆，請稍後重試。")
 
