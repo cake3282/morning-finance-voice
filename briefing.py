@@ -20,34 +20,36 @@ RSS_FEEDS = [
     "https://news.google.com/rss/search?q=%E5%8F%B0%E8%82%A1+%E7%BE%8E%E8%82%A1+%E5%8D%8A%E5%B0%8E%E9%AB%94+when:2d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
 ]
 
-# 偽裝瀏覽器請求頭，避免被 RSS 伺服器阻擋或卡死
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 
+def log(msg: str) -> None:
+    now = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%H:%M:%S")
+    print(f"[{now}] {msg}", flush=True)
+
+
 def clean_html_text(raw_html: str) -> str:
     if not raw_html:
         return ""
-    # 移除 HTML 標籤並還原跳脫字元
     text = re.sub(r"<[^>]+>", " ", raw_html)
     text = html.unescape(text)
-    # 合併多餘空白與換行
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
+    log("開始抓取 RSS 新聞...")
     items = []
     seen_titles = set()
 
     for url in RSS_FEEDS:
         try:
-            # 加入 10 秒 Timeout 保護，防止連線 Hang 住
             resp = requests.get(url, headers=HEADERS, timeout=10)
             feed = feedparser.parse(resp.content)
         except Exception as e:
-            print(f"抓取 RSS 失敗 ({url}): {e}")
+            log(f"抓取 RSS 失敗 ({url}): {e}")
             continue
 
         for entry in feed.entries[:8]:
@@ -56,7 +58,6 @@ def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
             raw_summary = entry.get("summary") or entry.get("description") or ""
             summary = clean_html_text(raw_summary)
 
-            # 若摘要跟標題幾乎一樣，就不再重複貼一次
             if summary and summary.lower() == title.lower():
                 summary = ""
 
@@ -77,18 +78,19 @@ def fetch_headlines(limit: int = 10, summary_max_len: int = 150) -> str:
         if len(items) >= limit:
             break
 
+    log(f"RSS 抓取完成，共 {len(items)} 則。")
     return "\n".join(items)
 
 
 def clean_script_for_weekend(text: str, is_weekend: bool) -> str:
     if not is_weekend:
         return text
-    # 避免週末語音稿出現「今日開盤／盤前」等誤導詞彙
     cleaned = re.sub(r"(今日|今天)(台股|美股|股市)?(即將|準備)?(開盤|盤前)", "本週市場", text)
     return cleaned
 
 
 def generate_script(news_digest: str, now_tw: datetime) -> str:
+    log("開始呼叫 Gemini 生成晨報稿...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     weekday_map = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
     today_str = now_tw.strftime("%Y年%m月%d日")
@@ -123,33 +125,51 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
     models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-lite"]
 
     for model_name in models_to_try:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
+                log(f"嘗試模型 {model_name}（第 {attempt + 1} 次）...")
                 resp = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
                 )
                 raw_text = resp.text.strip()
+                log(f"模型 {model_name} 成功產稿！")
                 return clean_script_for_weekend(raw_text, is_weekend)
             except Exception as e:
-                print(f"嘗試使用 {model_name} (第 {attempt + 1} 次) 失敗: {e}")
-                time.sleep(10)
+                log(f"模型 {model_name} 失敗: {e}")
+                time.sleep(5)
 
     raise RuntimeError("無法從 Gemini API 取得回覆，請稍後重試。")
 
 
-async def text_to_speech(text: str, mp3_path: str = "briefing.mp3") -> None:
+async def _save_tts(text: str, mp3_path: str) -> None:
     communicate = edge_tts.Communicate(text=text, voice="zh-TW-HsiaoChenNeural")
     await communicate.save(mp3_path)
 
 
+async def text_to_speech(text: str, mp3_path: str = "briefing.mp3") -> None:
+    log("開始合成語音 (edge-tts)...")
+    for attempt in range(2):
+        try:
+            # 限制單次語音合成最多 45 秒，避免卡死
+            await asyncio.wait_for(_save_tts(text, mp3_path), timeout=45)
+            log("語音合成完成！")
+            return
+        except Exception as e:
+            log(f"edge-tts 第 {attempt + 1} 次失敗或逾時: {e}")
+            await asyncio.sleep(3)
+    raise RuntimeError("edge-tts 語音合成逾時或失敗")
+
+
 def send_telegram(text: str, mp3_path: str = "briefing.mp3") -> None:
+    log("開始推播至 Telegram...")
     base = f"https://api.telegram.org/bot{BOT_TOKEN}"
     requests.post(
         f"{base}/sendMessage",
         data={"chat_id": CHAT_ID, "text": text[:4000]},
         timeout=30,
     ).raise_for_status()
+    log("文字訊息已送出。")
 
     with open(mp3_path, "rb") as audio:
         requests.post(
@@ -158,17 +178,4 @@ def send_telegram(text: str, mp3_path: str = "briefing.mp3") -> None:
             files={"voice": ("briefing.mp3", audio, "audio/mpeg")},
             timeout=60,
         ).raise_for_status()
-
-
-def main() -> None:
-    now_tw = datetime.now(ZoneInfo("Asia/Taipei"))
-    news_digest = fetch_headlines()
-    print("=== FETCHED NEWS DIGEST ===")
-    print(news_digest)
-    script = generate_script(news_digest, now_tw)
-    asyncio.run(text_to_speech(script))
-    send_telegram(script)
-
-
-if __name__ == "__main__":
-    main()
+    log("
