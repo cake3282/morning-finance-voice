@@ -151,7 +151,6 @@ async def text_to_speech(text: str, mp3_path: str = "briefing.mp3") -> None:
     log("開始合成語音 (edge-tts)...")
     for attempt in range(2):
         try:
-            # 限制單次語音合成最多 45 秒，避免卡死
             await asyncio.wait_for(_save_tts(text, mp3_path), timeout=45)
             log("語音合成完成！")
             return
@@ -178,4 +177,19 @@ def send_telegram(text: str, mp3_path: str = "briefing.mp3") -> None:
             files={"voice": ("briefing.mp3", audio, "audio/mpeg")},
             timeout=60,
         ).raise_for_status()
-    log("
+    log("語音訊息已送出！")
+
+
+def main() -> None:
+    now_tw = datetime.now(ZoneInfo("Asia/Taipei"))
+    news_digest = fetch_headlines()
+    print("=== FETCHED NEWS DIGEST ===", flush=True)
+    print(news_digest, flush=True)
+    script = generate_script(news_digest, now_tw)
+    asyncio.run(text_to_speech(script))
+    send_telegram(script)
+    log("全部流程順利完成！")
+
+
+if __name__ == "__main__":
+    main()
