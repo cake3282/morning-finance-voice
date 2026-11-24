@@ -110,7 +110,7 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
         )
 
     prompt = f"""
-你是每天早上七點播報的財經主播。現在時間是台灣時間 {today_str}（{weekday_str}）。
+你是每天早上六點播報的財經主播。現在時間是台灣時間 {today_str}（{weekday_str}）。
 {mode_instruction}
 
 請根據以下財經新聞標題與摘要，寫一份約 550 到 750 字（朗讀約 2.5 到 3.5 分鐘）的繁體中文晨報口語稿。
