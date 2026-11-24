@@ -122,7 +122,7 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
 近期財經新聞與摘要：
 {news_digest}
 """
-    models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-lite"]
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"]
 
     for model_name in models_to_try:
         for attempt in range(2):
