@@ -156,7 +156,7 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
 
 async def _save_tts(text: str, mp3_path: str) -> None:
     # 切換為年輕女聲：zh-TW-HsiaoYuNeural
-    communicate = edge_tts.Communicate(text=text, voice="zh-TW-HsiaoYuNeural")
+    communicate = edge_tts.Communicate(text=text, voice="zh-TW-HsiaoYuNeural", rate="+10%")
     await communicate.save(mp3_path)
 
 
