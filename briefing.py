@@ -15,6 +15,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 BOT_TOKEN = os.environ["TG_BOT_TOKEN"]
 CHAT_ID = os.environ["TG_CHAT_ID"]
 
+# 拆分為美股與台股獨立 RSS 來源
 US_RSS_FEEDS = [
     "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC,^IXIC,NVDA,TSLA,AAPL,MSFT,AVGO,MU,MRVL,AMD&region=US&lang=en-US",
 ]
@@ -83,12 +84,12 @@ def fetch_category_headlines(feeds: list, limit: int = 5, summary_max_len: int =
 
 
 def fetch_balanced_headlines() -> str:
-    log("開始抓取台股與美股 RSS 新聞（各抓 5 則）...")
-    us_items = fetch_category_headlines(US_RSS_FEEDS, limit=5)
-    tw_items = fetch_category_headlines(TW_RSS_FEEDS, limit=5)
+    log("開始抓取 RSS 新聞（美股 3 則、台股 7 則）...")
+    us_items = fetch_category_headlines(US_RSS_FEEDS, limit=3)
+    tw_items = fetch_category_headlines(TW_RSS_FEEDS, limit=7)
 
     digest = "【美股重點新聞】\n" + "\n".join(us_items) + "\n\n【台股重點新聞】\n" + "\n".join(tw_items)
-    log(f"RSS 抓取完成：美股 {len(us_items)} 則，台股 {len(tw_items)} 則。")
+    log(f"新聞抓取完成：美股 {len(us_items)} 則，台股 {len(tw_items)} 則。")
     return digest
 
 
@@ -110,14 +111,14 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
     if is_weekend:
         mode_instruction = (
             f"今天是 {today_str}（{weekday_str}），屬於週末休市日，台股與美股今天不開盤。"
-            "請以「本週台美股市場回顧」與「下週觀察重點」為主，美股與台股內容各占約 50%。"
+            "請以「本週台美股市場回顧」與「下週觀察重點」為主，美股 30% 占比與台股 70% 占比內容。"
             "嚴格禁止說「今天開盤」、「盤前觀察」或把過去日期當成今天。"
         )
     else:
         mode_instruction = (
             f"今天是 {today_str}（{weekday_str}），屬於交易日早晨。"
-            "請將報導比重嚴格分為兩大部分（各占約 50%）：前半段聚焦隔夜美股、人工智慧與半導體焦點；"
-            "後半段聚焦台股盤前觀察、產業趨勢與可留意的產業方向及代表性個股。"
+            "請將報導比重嚴格分為兩大部分（美股 30% / 台股 70%）：前半段簡要聚焦隔夜美股與科技焦點；"
+            "後半段重點聚焦台股盤前觀察、產業趨勢與可留意的產業方向及代表性個股。"
         )
 
     prompt = f"""
@@ -126,8 +127,8 @@ def generate_script(news_digest: str, now_tw: datetime) -> str:
 
 請根據以下財經新聞標題與摘要，寫一份約 700 到 800 字（朗讀時間約 3 分鐘）的繁體中文晨報口語稿。
 撰寫風格與結構要求：
-1. **開場與結尾精簡**：開頭一句話問候早安並點出今天是 {today_str} {weekday_str} 與台美股各半重點，不要冗長鋪陳；結尾簡短提醒留意波動與風險、祝投資順利即可。
-2. **台美股各占 50%**：美股與台股篇幅各半。美股部分圍繞隔夜股市、人工智慧晶片、大型科技股或重點企業動態；台股部分結合盤前氣氛、關稅或產業支撐訊號，並務實說明接下來可關注的產業方向（例如半導體先進製程與封測、AI伺服器與散熱、機器人與自動化設備等）以及市場常留意的代表性個股（如台積電、聯發科、鴻海、廣達、台達電或機器人與自動化相關供應鏈），語氣客觀務實，不講不切實際的保證或誇大預測。
+1. **開場與結尾精簡**：開頭一句話問候早安並點出今天是 {today_str} {weekday_str} 與美股三成、台股七成的重點，不要冗長開場；結尾簡短提醒留意波動與風險、祝投資順利即可。
+2. **台股 70% 與美股 30% 占比**：美股 30% 與台股 70% 篇幅。美股部分圍繞隔夜股市、人工智慧晶片或重點科技企業動態；台股部分結合盤前氣氛與產業訊號，並務實說明接下來可關注的產業方向（例如半導體先進製程與封測、AI伺服器與散熱、機器人與自動化設備等）以及市場常留意的代表性個股（如台積電、聯發科、鴻海、廣達、台達電或機器人與自動化相關供應鏈），語氣客觀務實，不講不切實際的保證或誇大預測。
 3. **事實依據與口語化**：新聞事件與數字請依據提供的標題與摘要脈絡撰寫，勿自行捏造新聞數據；使用自然口語與完整句子，避免 Markdown 星號、條列符號或難唸縮寫，英文代號請附上好唸的中文稱呼（例如輝達、特斯拉、博通、美光、標普五百、那斯達克）。
 
 近期財經新聞與摘要：
